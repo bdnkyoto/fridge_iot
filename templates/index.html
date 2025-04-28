@@ -1,0 +1,252 @@
+{% extends "base.html" %}
+
+{% block title %}Home - {{ super() }}{% endblock %}
+
+{% block head_extra %}
+    <style>
+        /* Styles specific to index page */
+        #videoFeed, #scanResultImage { display: block; max-width: 100%; height: auto; border-radius: 0.5rem; border: 1px solid #4b5563; background-color: #1f2937; box-shadow: 0 4px 6px rgba(0,0,0,0.2); }
+        .recipe-card {
+            background-color: #1f2937; /* Gray 800 */
+            border-radius: 0.75rem; /* Slightly more rounded */
+            padding: 1.25rem; /* More padding */
+            border: 1px solid #374151; /* Gray 700 */
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+            display: flex;
+            flex-direction: column; /* Stack elements vertically */
+            box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+        }
+        .recipe-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+            border-color: #4f46e5;
+        }
+         /* Container for recipe image and details */
+        .recipe-content {
+            display: flex;
+            flex-direction: row; /* Side-by-side layout */
+            align-items: flex-start; /* Align items top */
+            gap: 1rem; /* Space between image and text */
+            margin-bottom: 0.75rem; /* Space below content before button */
+            flex-grow: 1; /* Allow content to grow */
+        }
+        .recipe-details {
+            flex-grow: 1; /* Allow text details to take available space */
+        }
+        .recipe-image {
+            width: 6rem; /* Fixed width for recipe image */
+            height: 6rem; /* Fixed height */
+            object-fit: cover;
+            border-radius: 0.5rem;
+            flex-shrink: 0; /* Prevent image shrinking */
+            border: 1px solid #4b5563;
+        }
+        .loader { border: 4px solid #374151; border-top: 4px solid #6366f1; border-radius: 50%; width: 24px; height: 24px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .hidden { display: none; }
+        #scanFetchStatus { display: flex; align-items: center; justify-content: center; color: #9ca3af; min-height: 50px; transition: opacity 0.3s ease; }
+        #scanFetchStatus .loader { margin-right: 0.75rem; }
+        #scanResultContainer { margin-top: 1.5rem; }
+        /* Ensure save button is at the bottom */
+        .recipe-card .btn-save {
+             margin-top: auto; /* Push to bottom */
+             align-self: flex-end; /* Align to the right */
+        }
+         /* Section headers */
+        .section-header {
+             font-size: 1.3rem; /* Slightly larger */
+             font-weight: 600; /* Semibold */
+             color: #e5e7eb; /* Gray 200 */
+             margin-bottom: 1.5rem; /* More space below */
+             padding-bottom: 0.5rem; /* Space for border */
+             border-bottom: 1px solid #374151; /* Subtle separator */
+        }
+    </style>
+{% endblock %}
+
+{% block content %}
+    <header class="text-center mb-12">
+        <h1 class="text-4xl md:text-5xl font-bold text-white">FridgeVision AI</h1>
+        <p class="text-gray-400 mt-3 text-lg">Scan ingredients. Get recipes instantly.</p>
+    </header>
+
+    <main class="grid grid-cols-1 lg:grid-cols-2 gap-10">
+
+        <section class="bg-gray-800 p-6 sm:p-8 rounded-xl border border-gray-700 shadow-lg">
+            <h2 class="section-header">Live Scan / Result</h2>
+
+            <div id="scanResultContainer" class="mb-6 hidden">
+                 <h3 class="text-lg font-medium text-gray-300 mb-3 text-center">Scan Snapshot</h3>
+                 <img id="scanResultImage" alt="Scan Result Frame"
+                      onerror="this.onerror=null; this.src='https://placehold.co/640x480/1f2937/9ca3af?text=Error+Loading+Scan+Image'; this.classList.remove('hidden');">
+            </div>
+
+            <div id="liveFeedContainer" class="mb-4">
+                <h3 class="text-lg font-medium text-indigo-300 mb-3 text-center">Live Feed</h3>
+                <img id="videoFeed" src="{{ url_for('video_feed') }}" alt="Live Video Feed"
+                     class="mx-auto w-full max-w-md rounded-md border border-gray-600"
+                     onerror="this.onerror=null; this.src='https://placehold.co/640x480/1f2937/9ca3af?text=Webcam+Feed+Error';">
+            </div>
+             <div id="detectedIngredients" class="mt-5 text-center text-base text-gray-400 min-h-[24px] p-2 bg-gray-700 rounded-md">
+                <span class="font-medium text-gray-300">Detected:</span>
+                <span id="ingredientsList" class="ml-1">Initializing...</span>
+            </div>
+        </section>
+
+
+        <section class="bg-gray-800 p-6 sm:p-8 rounded-xl border border-gray-700 shadow-lg">
+            <h2 class="section-header">Recipe Suggestions</h2>
+
+            <div id="scanFetchStatus">
+                <div id="statusLoader" class="loader"></div>
+                <span id="statusText" class="text-lg">Scanning for ingredients...</span>
+            </div>
+
+            <div id="errorMessage" class="mt-4 text-red-400 hidden p-3 bg-red-900/50 border border-red-700 rounded-md"></div>
+
+            <div id="recipeResults" class="space-y-5 mt-4">
+
+            </div>
+        </section>
+    </main>
+{% endblock %}
+
+{% block scripts_extra %}
+    <script>
+        // --- JavaScript (no visual logic changes needed from previous version) ---
+        const recipeResultsDiv = document.getElementById('recipeResults');
+        const errorMessageDiv = document.getElementById('errorMessage');
+        const detectedIngredientsSpan = document.getElementById('ingredientsList');
+        const scanFetchStatusDiv = document.getElementById('scanFetchStatus');
+        const statusLoader = document.getElementById('statusLoader');
+        const statusText = document.getElementById('statusText');
+        const scanResultContainer = document.getElementById('scanResultContainer');
+        const scanResultImage = document.getElementById('scanResultImage');
+        const liveFeedContainer = document.getElementById('liveFeedContainer');
+        const isLoggedIn = document.querySelector('a[href="{{ url_for("my_recipes") }}"]') !== null;
+
+        async function updateLiveDetectedIngredients() { /* ... same as before ... */
+             try {
+                const response = await fetch('/get_detected_ingredients');
+                 if (!response.ok) { console.error(`HTTP error fetching live ingredients: ${response.status}`); return; }
+                const data = await response.json();
+                const currentIngredients = data.ingredients || [];
+                if (currentIngredients.length > 0) { detectedIngredientsSpan.textContent = currentIngredients.join(', '); }
+                else { detectedIngredientsSpan.textContent = 'Scanning...'; }
+            } catch (error) { console.error("Error updating live detected ingredients:", error); detectedIngredientsSpan.textContent = 'Update Error'; }
+        }
+
+        async function initiateScanAndFetch() { /* ... same as before ... */
+            statusLoader.classList.remove('hidden'); statusText.textContent = 'Scanning for ingredients...'; scanFetchStatusDiv.classList.remove('hidden');
+            errorMessageDiv.classList.add('hidden'); recipeResultsDiv.innerHTML = ''; scanResultContainer.classList.add('hidden'); scanResultImage.src = "";
+            try {
+                const response = await fetch('/scan_and_fetch');
+                statusText.textContent = 'Scan complete. Fetching recipes...';
+                if (!response.ok) { const errorData = await response.json().catch(() => ({ error: 'Scan/Fetch request failed with status ' + response.status })); throw new Error(errorData.error || `HTTP error! status: ${response.status}`); }
+                const data = await response.json();
+
+                if (data.recipes && data.recipes.length > 0) {
+                    statusText.textContent = `Scan complete. Found ${data.recipes.length} recipe(s).`;
+                    scanFetchStatusDiv.classList.add('opacity-0', 'h-0'); // Fade out status when done
+                    displayRecipes(data.recipes);
+                    console.log("Fetching scan result image...");
+                    scanResultImage.src = `/get_scan_frame?t=${new Date().getTime()}`;
+                    scanResultContainer.classList.remove('hidden');
+                } else if (data.error) { throw new Error(data.error); }
+                else { statusText.textContent = 'Scan complete. No recipes found.'; scanResultContainer.classList.add('hidden'); statusLoader.classList.add('hidden');} // Hide loader if no recipes
+            } catch (error) {
+                console.error("Error during scan/fetch:", error); statusLoader.classList.add('hidden'); statusText.textContent = 'Scan failed.';
+                errorMessageDiv.textContent = `Error: ${error.message}`; errorMessageDiv.classList.remove('hidden'); recipeResultsDiv.innerHTML = ''; scanResultContainer.classList.add('hidden');
+            }
+        }
+
+        function displayRecipes(recipes) { /* ... Adjusted HTML structure below ... */
+            recipeResultsDiv.innerHTML = '';
+            recipes.forEach(recipe => {
+                const card = document.createElement('div');
+                card.className = 'recipe-card'; // Class defines flex column
+
+                const contentDiv = document.createElement('div');
+                contentDiv.className = 'recipe-content'; // Flex row for image/details
+
+                const imgLink = document.createElement('a');
+                imgLink.href = recipe.recipeUrl || '#';
+                imgLink.target = '_blank';
+                imgLink.rel = 'noopener noreferrer';
+                const img = document.createElement('img');
+                img.src = recipe.image || 'https://placehold.co/96x96/1f2937/9ca3af?text=No+Img'; // 96x96 image
+                img.alt = recipe.title;
+                img.className = 'recipe-image'; // Class defines size/style
+                img.onerror = "this.onerror=null; this.src='https://placehold.co/96x96/1f2937/9ca3af?text=No+Img';";
+                imgLink.appendChild(img);
+
+                const detailsDiv = document.createElement('div');
+                detailsDiv.className = 'recipe-details'; // Flex grow
+
+                const title = document.createElement('h3');
+                title.className = 'text-lg font-semibold text-indigo-400 mb-1';
+                title.textContent = recipe.title;
+                const usedCount = document.createElement('p');
+                usedCount.className = 'text-sm text-gray-300';
+                usedCount.textContent = `Uses ${recipe.usedIngredientCount} of your ingredients.`;
+                const missedCount = document.createElement('p');
+                missedCount.className = 'text-sm text-gray-400 mb-2';
+                missedCount.textContent = `Needs ${recipe.missedIngredientCount} more.`;
+                const link = document.createElement('a');
+                link.href = recipe.recipeUrl || '#';
+                link.target = '_blank';
+                link.rel = 'noopener noreferrer';
+                link.className = 'text-sm text-indigo-400 hover:underline';
+                link.textContent = 'View Recipe Details';
+
+                detailsDiv.appendChild(title);
+                detailsDiv.appendChild(usedCount);
+                detailsDiv.appendChild(missedCount);
+                detailsDiv.appendChild(link);
+
+                contentDiv.appendChild(imgLink); // Add linked image
+                contentDiv.appendChild(detailsDiv); // Add text details
+
+                card.appendChild(contentDiv); // Add image+details container
+
+                // --- Save Button ---
+                if (isLoggedIn) {
+                    const saveButton = document.createElement('button');
+                    saveButton.className = 'btn btn-save'; // Defined in base.html styles
+                    saveButton.textContent = 'Save';
+                    saveButton.dataset.recipeId = recipe.id;
+                    saveButton.dataset.title = recipe.title;
+                    saveButton.dataset.imageUrl = recipe.image || '';
+                    saveButton.dataset.recipeUrl = recipe.recipeUrl || '';
+                    saveButton.onclick = handleSaveRecipe;
+                    card.appendChild(saveButton); // Append button at the end of the card
+                }
+                // --- End Save Button ---
+
+                recipeResultsDiv.appendChild(card);
+            });
+        }
+
+        async function handleSaveRecipe(event) { /* ... same as before ... */
+            const button = event.target; button.disabled = true; button.textContent = 'Saving...';
+            const recipeData = { spoonacular_id: button.dataset.recipeId, title: button.dataset.title, image_url: button.dataset.imageUrl, recipe_url: button.dataset.recipeUrl, };
+            console.log("Saving recipe:", recipeData);
+            try {
+                const response = await fetch('/save_recipe', { method: 'POST', headers: { 'Content-Type': 'application/json', }, body: JSON.stringify(recipeData) });
+                const result = await response.json();
+                if (response.ok && (result.status === 'success' || result.status === 'info')) { // Accept 'info' for already saved
+                    console.log("Save status:", result.message); button.textContent = 'Saved!'; button.classList.remove('btn-save'); button.classList.add('btn-secondary', 'opacity-75'); // Change style
+                } else { throw new Error(result.message || 'Save failed.'); }
+            } catch (error) {
+                console.error("Error saving recipe:", error); button.textContent = 'Save Failed'; alert(`Error saving recipe: ${error.message}`); button.disabled = false; button.textContent = 'Save';
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', (event) => {
+            setInterval(updateLiveDetectedIngredients, 1500);
+            initiateScanAndFetch();
+            updateLiveDetectedIngredients();
+        });
+    </script>
+{% endblock %}
+

@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}What's In Your Fridge?{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        /* Base styles */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #111827; /* Gray 900 */
+            color: #d1d5db; /* Gray 300 */
+        }
+        /* Button base styles */
+        .btn {
+            display: inline-flex; /* Align items center */
+            align-items: center;
+            justify-content: center;
+            padding: 0.6rem 1.2rem; /* Slightly adjusted padding */
+            border-radius: 0.5rem; /* Softer corners */
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.2s ease-in-out, box-shadow 0.2s ease-in-out, transform 0.1s ease;
+            border: 1px solid transparent; /* Base border */
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+        }
+        .btn:active {
+             transform: translateY(1px); /* Subtle press effect */
+             box-shadow: none;
+        }
+        /* Primary button (e.g., Register) */
+        .btn-primary {
+            background-color: #4f46e5; /* Indigo 600 */
+            color: white;
+            border-color: #4f46e5;
+        }
+        .btn-primary:hover {
+            background-color: #6366f1; /* Indigo 500 */
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        }
+        /* Secondary button (e.g., Logout) */
+        .btn-secondary {
+            background-color: #374151; /* Gray 700 */
+            color: #d1d5db; /* Gray 300 */
+            border-color: #4b5563; /* Gray 600 */
+        }
+        .btn-secondary:hover {
+            background-color: #4b5563; /* Gray 600 */
+            border-color: #525c6b;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        }
+         /* Save button (specific style) */
+        .btn-save {
+            background-color: #059669; /* Green 600 */
+            color: white;
+            padding: 0.25rem 0.75rem;
+            font-size: 0.875rem;
+            margin-left: auto; /* Push to right */
+             border-color: #059669;
+        }
+        .btn-save:hover {
+            background-color: #047857; /* Green 700 */
+             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        }
+        .btn-save:disabled, .btn:disabled { /* General disabled style */
+            background-color: #374151; /* Gray 700 */
+            color: #6b7280; /* Gray 500 */
+            cursor: not-allowed;
+            box-shadow: none;
+            border-color: #4b5563;
+        }
+        /* Form input base */
+        .form-input {
+            background-color: #1f2937; /* Gray 800 */
+            border: 1px solid #4b5563; /* Gray 600 */
+            color: #d1d5db; /* Gray 300 */
+            border-radius: 0.5rem; /* Match button radius */
+            padding: 0.6rem 0.9rem; /* Match button padding */
+            transition: border-color 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+            width: 100%; /* Default to full width */
+        }
+        .form-input:focus {
+            outline: none;
+            border-color: #4f46e5; /* Indigo 600 */
+            box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.5); /* Indigo focus ring */
+        }
+        /* Alert styling */
+        .alert {
+            padding: 0.9rem 1.2rem; /* More padding */
+            border-radius: 0.5rem; /* Match other elements */
+            margin-bottom: 1.5rem; /* More space below */
+            border: 1px solid transparent;
+            display: flex; /* Allow for icon alignment later */
+            align-items: center;
+        }
+        /* Consider adding icons to alerts later */
+        .alert-success { background-color: #064e3b; color: #a7f3d0; border-color: #065f46; } /* Darker Green */
+        .alert-danger { background-color: #991b1b; color: #fecaca; border-color: #b91c1c; } /* Darker Red */
+        .alert-warning { background-color: #92400e; color: #fef3c7; border-color: #b45309; } /* Darker Amber */
+        .alert-info { background-color: #1e40af; color: #bfdbfe; border-color: #1d4ed8; } /* Darker Blue */
+    </style>
+    {% block head_extra %}{% endblock %}
+</head>
+<body class="container mx-auto px-4 py-6 md:px-8 md:py-8">
+
+    <nav class="flex flex-col sm:flex-row justify-between items-center mb-10 pb-5 border-b border-gray-700 space-y-4 sm:space-y-0">
+        <a href="{{ url_for('index') }}" class="text-2xl font-bold text-white hover:text-gray-200 transition-colors">FridgeVision AI</a>
+        <div class="flex flex-wrap justify-center sm:justify-end items-center space-x-4 sm:space-x-5">
+            {# Consistent link styling #}
+            <a href="{{ url_for('index') }}" class="text-gray-300 hover:text-white transition-colors pb-1 border-b-2 border-transparent hover:border-indigo-500">Home</a>
+            {% if current_user.is_authenticated %}
+                <a href="{{ url_for('my_recipes') }}" class="text-gray-300 hover:text-white transition-colors pb-1 border-b-2 border-transparent hover:border-indigo-500">My Recipes</a>
+                <span class="text-gray-400 hidden md:inline">| Welcome, {{ current_user.username }}!</span>
+                <a href="{{ url_for('logout') }}" class="btn btn-secondary text-sm">Logout</a>
+            {% else %}
+                <a href="{{ url_for('login') }}" class="text-gray-300 hover:text-white transition-colors pb-1 border-b-2 border-transparent hover:border-indigo-500">Login</a>
+                <a href="{{ url_for('register') }}" class="btn btn-primary text-sm">Register</a>
+            {% endif %}
+        </div>
+    </nav>
+
+    {# Flash messages #}
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="max-w-4xl mx-auto"> {# Constrain width of alerts #}
+          {% for category, message in messages %}
+            <div class="alert alert-{{ category }}">{{ message }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    {# Main content block #}
+    <main>
+        {% block content %}
+        {% endblock %}
+    </main>
+
+    <footer class="text-center mt-16 text-gray-500 text-sm pt-6 border-t border-gray-700">
+        Powered by Flask, OpenCV, YOLO, and Spoonacular API. &copy; {{ now().year }}
+    </footer>
+
+    {% block scripts_extra %}{% endblock %}
+</body>
+</html>
