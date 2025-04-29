@@ -5,6 +5,7 @@ import os
 import threading
 import time
 import uuid
+import gc
 from flask import (
     Flask, render_template, Response, jsonify, request, send_file,
     redirect, url_for, flash, send_from_directory, abort
@@ -20,6 +21,9 @@ from PIL import Image
 from ultralytics import YOLO
 from datetime import datetime
 from sqlalchemy.exc import IntegrityError
+from collections import deque
+import numpy as np
+import torch
 
 # --- Configuration ---
 SPOONACULAR_API_KEY = os.environ.get("SPOONACULAR_API_KEY", "d375c8b90cf440bea6d6ff3bcf04cccd")
@@ -29,6 +33,12 @@ YOLO_CONFIDENCE = 0.4
 # --- DEBUG FLAG ---
 # Set to False to enable YOLO detection, True to bypass it for debugging camera feed
 BYPASS_YOLO_FOR_DEBUG = False # <<< CHANGE THIS TO True TO TEST BYPASSING YOLO
+
+# Add these near your other configuration settings
+FRAME_SKIP = 2  # Process every Nth frame
+TARGET_WIDTH = 640  # Target frame width
+MAX_QUEUE_SIZE = 10  # Maximum frames to keep in memory
+ENABLE_MEMORY_LOGGING = False  # Set to True to debug memory usage
 
 # --- Flask App Initialization & Configuration ---
 app = Flask(__name__, instance_relative_config=True)
@@ -122,6 +132,10 @@ if not BYPASS_YOLO_FOR_DEBUG:
         model_file = find_model_file(MODEL_PATH)
         if model_file:
             model = YOLO(model_file)
+            # Add memory optimization settings
+            model.to('cpu')  # Use CPU if GPU memory is limited
+            torch.set_grad_enabled(False)  # Disable gradient tracking
+            gc.collect()  # Force garbage collection after model load
             print(f"YOLO model loaded successfully from: {model_file}")
             # Load class names from the model
             class_names = model.names
@@ -142,6 +156,8 @@ else:
 # --- Global Variables & Locking ---
 frame_lock = threading.Lock(); video_capture = None; latest_frame = None
 detected_ingredients_global = set(); final_scan_frame_bytes = None; scan_frame_lock = threading.Lock()
+MAX_QUEUE_SIZE = 10
+frame_queue = deque(maxlen=MAX_QUEUE_SIZE)
 
 # --- Helper Functions ---
 def get_recipes(ingredients_list):
@@ -171,13 +187,11 @@ def initialize_camera():
     print("Error: Could not open webcam with default backend for tested indices.")
 
 def release_camera():
-    # ... (same as before) ...
     global video_capture
     with frame_lock:
         if video_capture: video_capture.release(); video_capture = None; print("Webcam released.")
 
 def create_placeholder_image(width=640, height=480, text="Not Found"):
-    # ... (same as before) ...
     try: from PIL import Image, ImageDraw
     except ImportError: print("Pillow not installed."); return None
     img = Image.new('RGB', (width, height), color = (73, 73, 73))
@@ -185,14 +199,24 @@ def create_placeholder_image(width=640, height=480, text="Not Found"):
     except Exception as e: print(f"Error drawing text: {e}")
     buffer = BytesIO(); img.save(buffer, format='JPEG'); return buffer.getvalue()
 
-# --- process_frames (ADDED MORE LOGGING) ---
+# --- process_frames
 def process_frames():
     global latest_frame, detected_ingredients_global, video_capture
     initialize_camera()
     frame_count = 0
     last_log_time = time.time() # For throttling logs
 
+    # Add frame skip and resolution control
+    frame_skip = 2  # Process every Nth frame
+    target_width = 640  # Reduce resolution
+    frame_count = 0
+
     while True:
+        if frame_count % frame_skip != 0:
+            frame_count += 1
+            time.sleep(0.03)
+            continue
+
         frame_copy = None
         current_detected_in_frame = set()
         processed_frame_for_stream = None
@@ -228,6 +252,10 @@ def process_frames():
 
         # --- Process frame only if read was successful ---
         if frame_read_success and frame_copy is not None:
+            # Resize frame to reduce memory usage
+            height = int(frame_copy.shape[0] * (target_width / frame_copy.shape[1]))
+            frame_copy = cv2.resize(frame_copy, (target_width, height))
+
             processed_frame_for_stream = frame_copy # Start with the raw frame
 
             # --- Optional YOLO Detection ---
@@ -295,6 +323,15 @@ def process_frames():
         frame_count += 1
         time.sleep(0.03) # Small delay regardless of success/failure
 
+        if frame_read_success and frame_copy is not None:
+            # Convert to lower precision to save memory
+            frame_copy = frame_copy.astype(np.uint8)
+
+            # Use queue instead of global latest_frame
+            with frame_lock:
+                if len(frame_queue) == MAX_QUEUE_SIZE:
+                    frame_queue.popleft()  # Remove oldest frame
+                frame_queue.append(frame_copy)
 
 def generate_video_feed():
     global latest_frame
@@ -441,9 +478,30 @@ def serve_snapshot(filename):
 def init_db():
     with app.app_context(): print("Initializing database..."); db.create_all(); print("Database tables created.")
 
+def cleanup_resources():
+    global video_capture, model
+    # Release video capture
+    if video_capture:
+        video_capture.release()
+        video_capture = None
+
+    # Clear model from memory
+    if model:
+        del model
+        gc.collect()
+
+    # Clear queues and global variables
+    with frame_lock:
+        frame_queue.clear()
+        global latest_frame
+        latest_frame = None
+
+# Modify main
 if __name__ == '__main__':
-    init_db()
-    frame_processor_thread = threading.Thread(target=process_frames, daemon=True); frame_processor_thread.start()
-    print("Starting Flask app...");
-    app.run(host='0.0.0.0', port=5000, debug=False, threaded=True) # Use threaded=True for background tasks
-    release_camera(); print("Flask app stopped.")
+    try:
+        init_db()
+        frame_processor_thread = threading.Thread(target=process_frames, daemon=True)
+        frame_processor_thread.start()
+        app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)
+    finally:
+        cleanup_resources()
